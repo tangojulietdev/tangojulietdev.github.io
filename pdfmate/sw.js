@@ -1,5 +1,5 @@
 // PDF Mate service worker: full offline precache, share target, file opening.
-const VERSION = 'pdfmate-v2';
+const VERSION = 'pdfmate-v3';
 const SHARE = 'pdfmate-share';
 const ASSETS = [
 "./",
@@ -211,7 +211,7 @@ self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== SHARE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith('pdfmate-') && k !== VERSION && k !== SHARE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('message', (e) => { if (e.data === 'version' && e.source) e.source.postMessage({ version: VERSION }); });
 
