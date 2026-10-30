@@ -1,7 +1,7 @@
 // PDF Mate by Tango Juliet Dev. Offline PDF fill, sign, mark up and page editing.
 import * as pdfjsLib from './vendor/pdf.min.mjs';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const PL = window.PDFLib;
 const base = new URL('./vendor/', import.meta.url).href;
 pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.mjs';
@@ -59,6 +59,7 @@ const IC = {
   download: '<path d="M12 3v12"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/>',
   extract: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-6M9.5 13.5 12 11l2.5 2.5"/>',
   stamp: '<path d="M9 12.5V9.8a3 3 0 1 1 6 0v2.7"/><path d="M4.5 15.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2V18h-15z"/><path d="M5 21h14"/>',
+  install: '<rect x="4" y="4" width="16" height="16" rx="4.5"/><path d="M12 8v8M8.5 12.5 12 16l3.5-3.5"/>',
   xmark: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/>'
 };
 const icon = (n, extra = '') => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true" ${extra}>${IC[n] || ''}</svg>`;
@@ -1114,6 +1115,7 @@ $('#btnMore').addEventListener('click', (e) => {
     { label: 'Fit to width', icon: 'fit', run: () => setZoom(0, true), disabled: !has },
     { label: 'Redo', icon: 'redo', kbd: 'Ctrl ⇧ Z', run: redo, disabled: !S.fut.length },
     '-',
+    ...(isStandalone() ? [] : [{ label: 'Install app', icon: 'install', run: doInstall }]),
     { label: `Appearance: ${themeLabel()}`, icon: 'theme', run: cycleTheme },
     { label: 'About PDF Mate', icon: 'info', run: about },
     { label: 'Close document', icon: 'xmark', run: () => { if (S.dirty) confirmSheet('Close without saving?', 'Your changes to this document will be lost.', 'Close', closeDoc); else closeDoc(); }, disabled: !has }
@@ -1121,7 +1123,7 @@ $('#btnMore').addEventListener('click', (e) => {
 });
 function about() {
   sheet(`<h2>PDF Mate</h2><p class="sub">Version ${VERSION} · by Tango Juliet Dev</p>
-    <p style="margin:0 0 10px;color:var(--label-2)">Fill, sign, stamp and mark up PDFs, then merge, reorder, rotate or delete pages. Works offline once installed. Files are processed on this device and are never uploaded.</p>
+    <p style="margin:0 0 10px;color:var(--label-2)">Fill, sign, stamp and mark up PDFs, then merge, reorder, rotate or delete pages. Works fully offline once opened or installed. Files are processed on this device and are never uploaded.</p>
     <p style="margin:0;color:var(--label-3);font-size:12px">Editing the original text of a PDF is not supported. Use Whiteout to cover text, then type over it. Built with pdf.js (Apache 2.0) and pdf-lib (MIT).</p>
     <div class="acts"><button class="btn primary" data-x>Done</button></div>`).querySelector('[data-x]').onclick = closeSheet;
 }
@@ -1159,7 +1161,7 @@ addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.r
 /* ---------- Boot ---------- */
 function boot() {
   $('#btnSidebar').innerHTML = icon('sidebar'); $('#btnUndo').innerHTML = icon('undo'); $('#btnRedo').innerHTML = icon('redo');
-  $('#btnOpen').innerHTML = icon('open'); $('#btnMore').innerHTML = icon('more'); $('#saveIc').outerHTML = icon('share');
+  $('#btnOpen').innerHTML = icon('open'); $('#btnInstall').innerHTML = icon('install'); $('#btnMore').innerHTML = icon('more'); $('#saveIc').outerHTML = icon('share');
   $('#zoomIn').innerHTML = icon('zin'); $('#zoomOut').innerHTML = icon('zout');
   const fi = { rotl: 'rotl', rotr: 'rotr', up: 'up', down: 'down', blank: 'blank', del: 'trash' };
   $$('#sbFoot [data-pa]').forEach((b) => b.innerHTML = icon(fi[b.dataset.pa]));
@@ -1170,7 +1172,56 @@ function boot() {
   const placeTools = () => { const t = $('#tools'); if (mq.matches) { if (t.parentElement !== document.body) document.body.appendChild(t); } else if (t.parentElement !== $('.toolbar')) $('.toolbar').insertBefore(t, $('.tb-right')); };
   placeTools(); mq.addEventListener('change', placeTools);
 }
-initFont().then(boot).catch((e) => { console.error(e); boot(); });
+let readyRes; const ready = new Promise((r) => { readyRes = r; });
+initFont().then(boot).catch((e) => { console.error(e); boot(); }).then(() => readyRes());
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+/* ---------- PWA: offline, install, open from OS ---------- */
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let installEvt = null;
+function showInstall(on) { $('#btnInstall').hidden = !on; $('#eInstall').hidden = !on; }
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; showInstall(true); });
+addEventListener('appinstalled', () => { installEvt = null; showInstall(false); toast('PDF Mate installed. It works offline.'); });
+async function doInstall() {
+  if (installEvt) { installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; showInstall(false); return; }
+  if (isIOS) {
+    sheet(`<h2>Install on iPhone or iPad</h2><p class="sub">Safari installs web apps from the Share menu.</p>
+      <ol style="margin:0 0 4px;padding-left:20px;line-height:1.9;color:var(--label-2)"><li>Tap the Share button ${icon('share', 'style="vertical-align:-3px"')} in Safari</li><li>Choose <b>Add to Home Screen</b></li><li>Tap <b>Add</b></li></ol>
+      <div class="acts"><button class="btn primary" data-x>Done</button></div>`).querySelector('[data-x]').onclick = closeSheet;
+    return;
+  }
+  sheet(`<h2>Install PDF Mate</h2><p class="sub">Open your browser menu and choose <b>Install app</b> or <b>Add to Home screen</b>.</p><div class="acts"><button class="btn primary" data-x>Done</button></div>`).querySelector('[data-x]').onclick = closeSheet;
+}
+$('#btnInstall').addEventListener('click', doInstall);
+$('#eInstall').addEventListener('click', doInstall);
+if (!isStandalone() && isIOS) showInstall(true);
+addEventListener('offline', () => toast('You are offline. PDF Mate keeps working.'));
+
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  const firstInstall = !navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    if (firstInstall) navigator.serviceWorker.ready.then(() => { toast('Ready to work offline'); });
+    reg.addEventListener('updatefound', () => { const w = reg.installing; if (w && !firstInstall) w.addEventListener('statechange', () => { if (w.state === 'activated') toast('PDF Mate updated. Reopen to use the new version.', { ms: 4500 }); }); });
+  }).catch((e) => console.warn('SW', e));
+}
+// Files opened from the OS (installed desktop app: Open with PDF Mate)
+if ('launchQueue' in window) {
+  window.launchQueue.setConsumer(async (params) => {
+    if (!params.files || !params.files.length) return;
+    const files = []; for (const h of params.files) { try { files.push(await h.getFile()); } catch (e) {} }
+    if (files.length) { await ready; addFiles(files); }
+  });
+}
+// Files shared to PDF Mate from other apps (Android share sheet)
+async function takeShared() {
+  if (!/[?&]share=1/.test(location.search) || !('caches' in window)) return;
+  history.replaceState(null, '', location.pathname);
+  try {
+    const c = await caches.open('pdfmate-share'); const keys = await c.keys(); const files = [];
+    for (const k of keys) { const r = await c.match(k); const b = await r.blob(); files.push(new File([b], decodeURIComponent(r.headers.get('x-name') || 'shared.pdf'), { type: b.type })); await c.delete(k); }
+    if (files.length) { await ready; addFiles(files); } else toast('Nothing was received from the share', { err: true });
+  } catch (e) { toast('Could not read the shared file', { err: true }); }
+}
+takeShared();
+if (/[?&]source=pwa/.test(location.search)) history.replaceState(null, '', location.pathname);
 window.__pdfmate = { S, buildPdf, geo, vpTransform, addFiles };

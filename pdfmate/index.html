@@ -12,15 +12,12 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script>(function(){try{var t=localStorage.getItem('pdfmate.theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <style>
 /* Layout: macOS document window. Glass toolbar on top, glass page sidebar left, document canvas centre,
    format bar under the toolbar. On phones the tool strip becomes a floating glass dock at the bottom. */
 :root{
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --win: #f5f5f7;
   --canvas: #e4e4e9;
@@ -294,6 +291,7 @@ textarea.inp{height:auto;min-height:70px;padding:8px 11px;resize:vertical}
       </div>
       <button class="tbtn" id="btnUndo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled></button>
       <button class="tbtn tb-hide-m" id="btnRedo" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled></button>
+      <button class="tbtn" id="btnInstall" aria-label="Install app" title="Install PDF Mate" hidden></button>
       <button class="tbtn" id="btnOpen" aria-label="Open or add files" title="Open or add files"></button>
       <button class="tbtn" id="btnMore" aria-label="More" title="More" aria-haspopup="menu"></button>
       <button class="tbtn primary" id="btnSave" disabled><span id="saveIc"></span><span class="tb-hide-m">Save</span></button>
@@ -327,6 +325,7 @@ textarea.inp{height:auto;min-height:70px;padding:8px 11px;resize:vertical}
             <button class="btn" id="eBlank">Blank page</button>
           </div>
           <div class="feat" id="feat"></div>
+          <button class="btn" id="eInstall" style="margin-top:18px" hidden>Install app</button>
         </div>
       </div>
     </main>
@@ -339,6 +338,6 @@ textarea.inp{height:auto;min-height:70px;padding:8px 11px;resize:vertical}
 <input type="file" id="fileStamp" accept="image/*" hidden>
 <div id="layer"></div>
 <script src="vendor/pdf-lib.min.js"></script>
-<script type="module" src="app.js?v=1"></script>
+<script type="module" src="app.js?v=2"></script>
 </body>
 </html>
