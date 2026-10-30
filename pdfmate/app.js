@@ -1,7 +1,7 @@
 // PDF Mate by Tango Juliet Dev. Offline PDF fill, sign, mark up and page editing.
 import * as pdfjsLib from './vendor/pdf.min.mjs';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const PL = window.PDFLib;
 const base = new URL('./vendor/', import.meta.url).href;
 pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.mjs';
@@ -60,6 +60,9 @@ const IC = {
   extract: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-6M9.5 13.5 12 11l2.5 2.5"/>',
   stamp: '<path d="M9 12.5V9.8a3 3 0 1 1 6 0v2.7"/><path d="M4.5 15.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2V18h-15z"/><path d="M5 21h14"/>',
   install: '<rect x="4" y="4" width="16" height="16" rx="4.5"/><path d="M12 8v8M8.5 12.5 12 16l3.5-3.5"/>',
+  print: '<path d="M7 9V3.5h10V9"/><rect x="3" y="9" width="18" height="8" rx="2.5"/><path d="M7 14h10v6.5H7z"/><path d="M17.5 12h.01"/>',
+  longedge: '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M5 3v18" stroke-width="3"/><path d="M9 8h6M9 12h6"/>',
+  shortedge: '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M5 3h14" stroke-width="3"/><path d="M9 9h6M9 13h6"/>',
   xmark: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/>'
 };
 const icon = (n, extra = '') => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true" ${extra}>${IC[n] || ''}</svg>`;
@@ -355,7 +358,7 @@ function newBlank(at = S.pages.length, like) {
   renderAll(); commit(); scrollToPage(at);
 }
 function closeDoc() {
-  for (const d of S.docs.values()) { try { d.pdf.destroy(); } catch (e) {} }
+  for (const d of S.docs.values()) { try { d.pdf.loadingTask.destroy(); } catch (e) {} }
   S.docs.clear(); S.imgs.clear(); S.pages = []; S.sel = null; S.selPages.clear(); thumbCache.clear();
   $('#docName').value = 'Untitled'; setTool('select'); renderAll(); resetHistory(); setDirty(false); updateChrome(); setSidebar(false);
 }
@@ -958,7 +961,7 @@ function fillForm(ld, doc) {
   }
   form.flatten({ updateFieldAppearances: true });
 }
-async function buildPdf(list, onProgress) {
+async function buildPdf(list, onProgress, opts = {}) {
   const out = await PL.PDFDocument.create();
   out.setProducer('PDF Mate by Tango Juliet Dev'); out.setCreator('PDF Mate');
   const font = await out.embedFont(PL.StandardFonts.Helvetica);
@@ -999,6 +1002,9 @@ async function buildPdf(list, onProgress) {
     for (const a of p.annots) await drawAnn(page, a, font, embedImg);
     if (onProgress) onProgress((i + 1) / list.length);
   }
+  if (opts.duplex) {
+    try { const vp = out.catalog.getOrCreateViewerPreferences(); vp.setDuplex(PL.Duplex[{ simplex: 'Simplex', long: 'DuplexFlipLongEdge', short: 'DuplexFlipShortEdge' }[opts.duplex]]); } catch (e) { console.warn(e); }
+  }
   return out.save({ useObjectStreams: true });
 }
 async function drawAnn(page, a, font, embedImg) {
@@ -1025,7 +1031,7 @@ function openSave() {
     <div class="field"><label for="saveName">File name</label><input id="saveName" class="inp" value="${esc(fileName())}" autocomplete="off"></div>
     ${nSel ? `<div class="field"><span class="flabel">Pages</span><div class="seg" role="group"><button aria-pressed="true" data-sc="all">All ${S.pages.length}</button><button aria-pressed="false" data-sc="sel">Selected ${nSel}</button></div></div>` : ''}
     <div class="progress" hidden><i></i></div>
-    <div class="acts">${canShare ? `<button class="btn" data-share>${icon('share')} Share</button>` : ''}<button class="btn primary" data-dl>${icon('download')} Download</button></div>`);
+    <div class="acts"><button class="btn" data-print>${icon('print')} Print</button>${canShare ? `<button class="btn" data-share>${icon('share')} Share</button>` : ''}<button class="btn primary" data-dl>${icon('download')} Download</button></div>`);
   sh.querySelectorAll('[data-sc]').forEach((b) => b.onclick = () => { scope = b.dataset.sc; sh.querySelectorAll('[data-sc]').forEach((z) => z.setAttribute('aria-pressed', z === b)); });
   const run = async (mode) => {
     const name = (() => { let n = sh.querySelector('#saveName').value.trim() || 'Untitled'; n = n.replace(/[\\/:*?"<>|]+/g, '-'); return /\.pdf$/i.test(n) ? n : n + '.pdf'; })();
@@ -1048,9 +1054,130 @@ function openSave() {
     } catch (e) { console.error(e); btns.forEach((b) => b.disabled = false); pr.hidden = true; toast('Could not save. ' + (e && e.message ? e.message : ''), { err: true, ms: 5000 }); }
   };
   sh.querySelector('[data-dl]').onclick = () => run('dl');
+  sh.querySelector('[data-print]').onclick = () => { closeSheet(); openPrint(); };
   const s2 = sh.querySelector('[data-share]'); if (s2) s2.onclick = () => run('share');
 }
 function downloadBlob(blob, name) { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 30000); }
+
+/* ---------- Print ---------- */
+function parseRange(str, n) {
+  const out = []; const seen = new Set();
+  for (const part of String(str).split(/[,;\s]+/).filter(Boolean)) {
+    const m = /^(\d*)\s*-\s*(\d*)$/.exec(part); let a, b;
+    if (m) { a = m[1] ? +m[1] : 1; b = m[2] ? +m[2] : n; } else if (/^\d+$/.test(part)) { a = b = +part; } else return null;
+    if (a < 1 || b > n || a > b) return null;
+    for (let i = a; i <= b; i++) if (!seen.has(i)) { seen.add(i); out.push(i - 1); }
+  }
+  return out.length ? out : null;
+}
+const flip = (p) => ({ ...p, rot: ((p.rot || 0) + 180) % 360 });
+const blankLike = (p) => { const g = geo(p); return { id: uid('p'), kind: 'blank', view: [0, 0, g.w, g.h], baseRot: 0, rot: 0, annots: [] }; };
+function manualSides(list, binding) {
+  // Fronts: pages 1,3,5... Backs: pages 2,4,6... printed in reverse so the flipped stack lines up.
+  const fronts = [], backs = [];
+  for (let i = 0; i < list.length; i += 2) { fronts.push(list[i]); backs.push(list[i + 1] || blankLike(list[i])); }
+  let b = backs.reverse();
+  if (binding === 'short') b = b.map(flip);
+  return { fronts, backs: b };
+}
+const canIframePrint = () => navigator.pdfViewerEnabled === true && !/android|iphone|ipad|ipod/i.test(navigator.userAgent) && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+async function printBytes(bytes) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  if (canIframePrint()) {
+    const old = $('#printFrame'); if (old) old.remove();
+    const f = document.createElement('iframe'); f.id = 'printFrame'; f.title = 'Print';
+    Object.assign(f.style, { position: 'fixed', right: '0', bottom: '0', width: '2px', height: '2px', border: '0', opacity: '0', pointerEvents: 'none' });
+    const url = URL.createObjectURL(blob); f.src = url; document.body.appendChild(f);
+    await new Promise((res) => { f.onload = res; setTimeout(res, 4000); });
+    await new Promise((r) => setTimeout(r, 450));
+    try { f.contentWindow.focus(); f.contentWindow.print(); return; }
+    catch (e) { console.warn('iframe print failed, using page print', e); }
+  }
+  await printRaster(bytes);
+}
+async function printRaster(bytes) {
+  const t = toast('Preparing pages for printing', { spin: true, sticky: true });
+  const root = $('#printRoot') || Object.assign(document.createElement('div'), { id: 'printRoot' }); root.innerHTML = ''; document.body.appendChild(root);
+  const urls = [];
+  try {
+    const pdf = await pdfjsLib.getDocument({ ...PDFJS_OPTS, data: bytes.slice() }).promise;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const pg = await pdf.getPage(i); const v1 = pg.getViewport({ scale: 1 }); const land = v1.width > v1.height;
+      const scale = Math.min(200 / 72, 3600 / Math.max(v1.width, v1.height));
+      const vp = pg.getViewport({ scale }); const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+      await pg.render({ canvasContext: x, viewport: vp }).promise;
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92)); const u = URL.createObjectURL(blob); urls.push(u);
+      const d = document.createElement('div'); d.className = 'pp ' + (land ? 'pl' : 'pt'); d.innerHTML = `<img src="${u}" alt="">`; root.appendChild(d);
+    }
+    await Promise.all([...root.querySelectorAll('img')].map((im) => im.decode().catch(() => {})));
+    try { pdf.loadingTask.destroy(); } catch (e) {}
+  } catch (e) { console.error('print raster', e); t.remove(); toast('Could not prepare the pages for printing', { err: true }); return; }
+  t.remove();
+  const clean = () => { root.innerHTML = ''; urls.forEach((u) => URL.revokeObjectURL(u)); removeEventListener('afterprint', clean); };
+  addEventListener('afterprint', clean);
+  window.print();
+}
+function openPrint() {
+  if (!S.pages.length) return; closeEditor(false);
+  const nSel = S.selPages.size; const st = lsGet('pdfmate.print', { sides: 'one', bind: 'long' });
+  let scope = nSel ? 'sel' : 'all', sides = st.sides, bind = st.bind;
+  const desk = canIframePrint();
+  const sh = sheet(`<h2>Print</h2><p class="sub">${S.pages.length} page${S.pages.length > 1 ? 's' : ''}. Markup, signatures and form entries print as shown.</p>
+    <div class="field"><span class="flabel">Pages</span><div class="seg" role="group" aria-label="Pages"><button data-sc="all">All</button>${nSel ? `<button data-sc="sel">Selected ${nSel}</button>` : ''}<button data-sc="range">Range</button></div>
+      <input id="prRange" class="inp" style="margin-top:8px" placeholder="For example 1-3, 6" inputmode="numeric" autocomplete="off" hidden></div>
+    <div class="field"><span class="flabel">Sides</span><div class="seg" role="group" aria-label="Sides"><button data-sd="one">One-sided</button><button data-sd="two">Two-sided</button><button data-sd="manual">Manual two-sided</button></div></div>
+    <div class="field" id="prBindF"><span class="flabel">Binding</span><div class="seg" role="group" aria-label="Binding" style="height:auto">
+      <button data-bd="long" style="height:auto;padding:8px 6px;display:flex;flex-direction:column;align-items:center;gap:4px">${icon('longedge', 'style="width:26px;height:26px"')}<span>Long edge</span><small style="color:var(--label-3);font-weight:400">Book style</small></button>
+      <button data-bd="short" style="height:auto;padding:8px 6px;display:flex;flex-direction:column;align-items:center;gap:4px">${icon('shortedge', 'style="width:26px;height:26px"')}<span>Short edge</span><small style="color:var(--label-3);font-weight:400">Flip up, calendar style</small></button></div></div>
+    <p class="sub" id="prNote" style="margin:4px 0 0"></p>
+    <div class="progress" hidden><i></i></div>
+    <div class="acts" id="prActs"></div>`);
+  const range = sh.querySelector('#prRange');
+  const pick = () => {
+    if (scope === 'all') return S.pages;
+    if (scope === 'sel') return S.pages.filter((p) => S.selPages.has(p.id));
+    const idx = parseRange(range.value, S.pages.length); return idx ? idx.map((i) => S.pages[i]) : null;
+  };
+  const paint = () => {
+    sh.querySelectorAll('[data-sc]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.sc === scope));
+    sh.querySelectorAll('[data-sd]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.sd === sides));
+    sh.querySelectorAll('[data-bd]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.bd === bind));
+    range.hidden = scope !== 'range'; sh.querySelector('#prBindF').hidden = sides === 'one';
+    const edge = bind === 'long' ? 'long edge' : 'short edge';
+    sh.querySelector('#prNote').innerHTML = sides === 'one' ? 'Prints on one side of each sheet.'
+      : sides === 'two' ? (desk ? `The print dialog opens with two-sided printing set to flip on the ${edge}. If it is not ticked, open <b>More settings</b> and tick <b>Print on both sides</b>.` : `In the print screen choose <b>Two-sided</b> and <b>${bind === 'long' ? 'Long edge' : 'Short edge'}</b>.`)
+      : `For printers that cannot print both sides. Print the fronts, put the printed stack back in the paper tray so the blank sides will be printed, then print the backs. Try it with two sheets first, because trays differ between printers.`;
+    const acts = sh.querySelector('#prActs');
+    acts.innerHTML = sides === 'manual'
+      ? `<button class="btn" data-x>Cancel</button><button class="btn" data-go="fronts">1. Print fronts</button><button class="btn primary" data-go="backs">2. Print backs</button>`
+      : `<button class="btn" data-x>Cancel</button><button class="btn primary" data-go="all">${icon('print')} Print</button>`;
+    acts.querySelector('[data-x]').onclick = closeSheet;
+    acts.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => run(b.dataset.go, b));
+  };
+  const run = async (what, btn) => {
+    lsSet('pdfmate.print', { sides, bind });
+    const list = pick(); if (!list || !list.length) { toast('Enter a page range such as 1-3, 6', { err: true }); range.focus(); return; }
+    let pages = list, duplex = 'simplex';
+    if (sides === 'two') duplex = bind;
+    if (sides === 'manual') { const m = manualSides(list, bind); pages = what === 'fronts' ? m.fronts : m.backs; }
+    const btns = sh.querySelectorAll('.acts .btn'); btns.forEach((b) => b.disabled = true);
+    const pr = sh.querySelector('.progress'); pr.hidden = false; const bar = pr.querySelector('i'); bar.style.width = '0';
+    try {
+      const bytes = await buildPdf(pages, (f) => { bar.style.width = Math.round(f * 100) + '%'; }, { duplex });
+      await printBytes(bytes);
+      if (sides === 'manual' && what === 'fronts') { toast('Fronts sent. Turn the stack over, put it back in the tray, then tap Print backs.', { ms: 6000 }); btns.forEach((b) => b.disabled = false); pr.hidden = true; }
+      else closeSheet();
+    } catch (e) { console.error(e); btns.forEach((b) => b.disabled = false); pr.hidden = true; toast('Could not print. ' + (e && e.message ? e.message : ''), { err: true, ms: 5000 }); }
+  };
+  sh.addEventListener('click', (e) => {
+    const sc = e.target.closest('[data-sc]'), sd = e.target.closest('[data-sd]'), bd = e.target.closest('[data-bd]');
+    if (sc) { scope = sc.dataset.sc; paint(); if (scope === 'range') range.focus(); }
+    if (sd) { sides = sd.dataset.sd; paint(); }
+    if (bd) { bind = bd.dataset.bd; paint(); }
+  });
+  paint();
+}
 
 /* ---------- Form list sheet ---------- */
 function openFormList() {
@@ -1080,7 +1207,7 @@ function updateMeta() {
 }
 function updateChrome() {
   const has = S.pages.length > 0;
-  $('#btnSave').disabled = !has; $('#tools').hidden = !has; $('#btnUndo').disabled = !S.hist.length; $('#btnRedo').disabled = !S.fut.length;
+  $('#btnSave').disabled = !has; $('#btnPrint').disabled = !has; $('#tools').hidden = !has; $('#btnUndo').disabled = !S.hist.length; $('#btnRedo').disabled = !S.fut.length;
   $('#zoomIn').disabled = $('#zoomOut').disabled = $('#zoomLbl').disabled = !has;
   $$('#sbFoot .tbtn').forEach((b) => b.disabled = !has);
   updateMeta();
@@ -1091,6 +1218,7 @@ $('#zoomIn').addEventListener('click', () => setZoom(S.zoom * 1.2)); $('#zoomOut
 $('#zoomLbl').addEventListener('click', () => setZoom(0, true));
 $('#btnOpen').addEventListener('click', () => $('#fileOpen').click());
 $('#btnSave').addEventListener('click', openSave);
+$('#btnPrint').addEventListener('click', openPrint);
 $('#eOpen').addEventListener('click', () => $('#fileOpen').click());
 $('#ePhotos').addEventListener('click', () => $('#fileImg').click());
 $('#eBlank').addEventListener('click', () => newBlank());
@@ -1107,6 +1235,7 @@ $('#btnMore').addEventListener('click', (e) => {
     { label: 'Open or add PDF…', icon: 'open', kbd: 'Ctrl O', run: () => $('#fileOpen').click() },
     { label: 'Add photos as pages…', icon: 'photo', run: () => $('#fileImg').click() },
     { label: 'Insert blank page', icon: 'blank', run: () => pageAction('blank'), disabled: !has },
+    { label: 'Print…', icon: 'print', kbd: 'Ctrl P', run: openPrint, disabled: !has },
     { label: forms ? `Fill form fields (${forms})` : 'Fill form fields', icon: 'form', run: openFormList, disabled: !forms },
     { label: 'Signatures and stamps…', icon: 'sign', run: () => { if (!has) { toast('Open a PDF first'); return; } openLibrary(); } },
     '-',
@@ -1135,6 +1264,7 @@ document.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'z' && !inField) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && e.key.toLowerCase() === 'y' && !inField) { e.preventDefault(); redo(); return; }
   if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); openSave(); return; }
+  if (mod && e.key.toLowerCase() === 'p') { e.preventDefault(); openPrint(); return; }
   if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); $('#fileOpen').click(); return; }
   if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); setZoom(S.zoom * 1.2); return; }
   if (mod && e.key === '-') { e.preventDefault(); setZoom(S.zoom / 1.2); return; }
@@ -1161,7 +1291,7 @@ addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.r
 /* ---------- Boot ---------- */
 function boot() {
   $('#btnSidebar').innerHTML = icon('sidebar'); $('#btnUndo').innerHTML = icon('undo'); $('#btnRedo').innerHTML = icon('redo');
-  $('#btnOpen').innerHTML = icon('open'); $('#btnInstall').innerHTML = icon('install'); $('#btnMore').innerHTML = icon('more'); $('#saveIc').outerHTML = icon('share');
+  $('#btnOpen').innerHTML = icon('open'); $('#btnInstall').innerHTML = icon('install'); $('#btnPrint').innerHTML = icon('print'); $('#btnMore').innerHTML = icon('more'); $('#saveIc').outerHTML = icon('share');
   $('#zoomIn').innerHTML = icon('zin'); $('#zoomOut').innerHTML = icon('zout');
   const fi = { rotl: 'rotl', rotr: 'rotr', up: 'up', down: 'down', blank: 'blank', del: 'trash' };
   $$('#sbFoot [data-pa]').forEach((b) => b.innerHTML = icon(fi[b.dataset.pa]));
@@ -1190,11 +1320,18 @@ async function doInstall() {
       <div class="acts"><button class="btn primary" data-x>Done</button></div>`).querySelector('[data-x]').onclick = closeSheet;
     return;
   }
-  sheet(`<h2>Install PDF Mate</h2><p class="sub">Open your browser menu and choose <b>Install app</b> or <b>Add to Home screen</b>.</p><div class="acts"><button class="btn primary" data-x>Done</button></div>`).querySelector('[data-x]').onclick = closeSheet;
+  const edge = /Edg\//.test(navigator.userAgent), android = /android/i.test(navigator.userAgent);
+  const steps = android ? '<li>Tap the <b>⋮</b> menu in Chrome</li><li>Tap <b>Add to Home screen</b>, then <b>Install</b></li>'
+    : edge ? '<li>Click the <b>…</b> menu in Edge</li><li>Choose <b>Apps</b>, then <b>Install this site as an app</b></li>'
+    : '<li>Click the <b>⋮</b> menu in Chrome</li><li>Choose <b>Cast, save, and share</b>, then <b>Install page as app</b></li>';
+  sheet(`<h2>Install PDF Mate</h2><p class="sub">Your browser did not offer the install button. You can install from its menu instead.</p>
+    <ol style="margin:0 0 10px;padding-left:20px;line-height:1.9;color:var(--label-2)">${steps}</ol>
+    <p class="sub" style="margin:0">If the menu says <b>Open in Tools for Mate</b> or another app, that app is claiming this address. Uninstall it, reload this page, then install both again.</p>
+    <div class="acts"><button class="btn primary" data-x>Done</button></div>`).querySelector('[data-x]').onclick = closeSheet;
 }
 $('#btnInstall').addEventListener('click', doInstall);
 $('#eInstall').addEventListener('click', doInstall);
-if (!isStandalone() && isIOS) showInstall(true);
+if (!isStandalone()) showInstall(true);
 addEventListener('offline', () => toast('You are offline. PDF Mate keeps working.'));
 
 if ('serviceWorker' in navigator && window.isSecureContext) {

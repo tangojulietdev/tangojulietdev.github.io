@@ -1,10 +1,10 @@
 // PDF Mate service worker: full offline precache, share target, file opening.
-const VERSION = 'pdfmate-v3';
+const VERSION = 'pdfmate-v5';
 const SHARE = 'pdfmate-share';
 const ASSETS = [
 "./",
 "index.html",
-"app.js?v=2",
+"app.js?v=4",
 "manifest.webmanifest",
 "icons/icon-192.png",
 "icons/icon-512.png",

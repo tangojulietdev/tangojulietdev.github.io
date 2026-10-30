@@ -10,6 +10,7 @@ Offline PDF editor by Tango Juliet Dev. Fill, sign, stamp and mark up PDFs, then
 - Signatures drawn on screen and imported stamp images (with white background removal), kept in a local library.
 - Page sidebar: reorder by drag or buttons, rotate, delete, insert blank, multi-select, save selected pages only.
 - Undo and redo, keyboard shortcuts, light and dark appearance.
+- Print with page range, one-sided, two-sided (long or short edge binding, preset in the print dialog) or manual two-sided for printers without duplex.
 - Save by download or share sheet (email, WhatsApp) on phones.
 
 Editing the original text inside a PDF is not supported. Cover it with Whiteout and type over it.
